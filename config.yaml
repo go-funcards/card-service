@@ -1,0 +1,37 @@
+rules:
+  v1.CreateCardRequest_Att:
+    AttachmentId: "required,uuid4"
+    Type: "oneof=0"
+  v1.CreateCardRequest:
+    CardId: "required,uuid4"
+    OwnerId: "required,uuid4"
+    BoardId: "required,uuid4"
+    CategoryId: "required,uuid4"
+    Name: "required,max=1000"
+    Type: "oneof=0 1"
+    Content: "omitempty,max=10000"
+    Tags: "omitempty,dive,uuid4"
+    Attachments: "omitempty,dive"
+  v1.UpdateCardRequest_Att:
+    AttachmentId: "required,uuid4"
+    Type: "oneof=0"
+  v1.UpdateCardRequest:
+    CardId: "required,uuid4"
+    BoardId: "omitempty,uuid4"
+    CategoryId: "omitempty,uuid4"
+    Name: "omitempty,max=1000"
+    Content: "omitempty,max=10000"
+    Tags: "omitempty,dive,uuid4"
+    Attachments: "omitempty,dive"
+  v1.UpdateManyCardsRequest:
+    Cards: "required,min=1,dive"
+  v1.DeleteCardRequest:
+    CardId: "required,uuid4"
+  v1.CardsRequest:
+    PageSize: "required,min=1,max=1000"
+    Types: "omitempty,dive,oneof=0 1"
+    Tags: "omitempty,dive,uuid4"
+    CardIds: "omitempty,dive,uuid4"
+    OwnerIds: "omitempty,dive,uuid4"
+    BoardIds: "omitempty,dive,uuid4"
+    CategoryIds: "omitempty,dive,uuid4"

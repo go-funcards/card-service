@@ -1,0 +1,107 @@
+syntax = "proto3";
+
+option java_multiple_files = true;
+option java_package = "org.funcards.card.proto.v1";
+option java_outer_classname = "CardProto";
+option go_package = "./;v1";
+option csharp_namespace = "FunCardsOrg.Grpc.V1";
+
+package proto.v1;
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/empty.proto";
+
+service Card {
+  rpc CreateCard(CreateCardRequest) returns (google.protobuf.Empty);
+  rpc UpdateCard(UpdateCardRequest) returns (google.protobuf.Empty);
+  rpc UpdateManyCards(UpdateManyCardsRequest) returns (google.protobuf.Empty);
+  rpc DeleteCard(DeleteCardRequest) returns (google.protobuf.Empty);
+  rpc GetCards(CardsRequest) returns (CardsResponse);
+}
+
+enum CardType {
+  UNK_CARD = 0; // UNKNOWN_CARD
+  TEXT = 1;
+}
+
+enum AttType {
+  UNK_ATT = 0; // UNKNOWN_ATTACHMENT
+}
+
+message CreateCardRequest {
+  message Att {
+    string attachment_id = 1;
+    AttType type = 2;
+  }
+
+  string card_id = 1;
+  string owner_id = 2;
+  string board_id = 3;
+  string category_id = 4;
+  string name = 5;
+  string content = 6;
+  int32 position = 7;
+  CardType type = 8;
+  repeated string tags = 9;
+  repeated Att attachments = 10;
+}
+
+message UpdateCardRequest {
+  message Att {
+    string attachment_id = 1;
+    AttType type = 2;
+    bool delete = 3;
+  }
+
+  string card_id = 1;
+  string board_id = 2;
+  string category_id = 3;
+  string name = 4;
+  string content = 5;
+  int32 position = 6;
+  repeated string tags = 7;
+  repeated Att attachments = 8;
+}
+
+message UpdateManyCardsRequest {
+  repeated UpdateCardRequest cards = 1;
+}
+
+message DeleteCardRequest {
+  string card_id = 1;
+}
+
+message CardsRequest {
+  uint64 page_index = 1;
+  uint32 page_size = 2;
+  repeated CardType types = 3;
+  repeated string tags = 4;
+  repeated string card_ids = 5;
+  repeated string owner_ids = 6;
+  repeated string board_ids = 7;
+  repeated string category_ids = 8;
+}
+
+message CardsResponse {
+  message Card {
+    message Attachment {
+      string attachment_id = 1;
+      AttType type = 2;
+    }
+
+    string card_id = 1;
+    string owner_id = 2;
+    string board_id = 3;
+    string category_id = 4;
+    string name = 5;
+    CardType type = 6;
+    string content = 7;
+    int32 position = 8;
+    google.protobuf.Timestamp created_at = 9;
+    repeated string tags = 10;
+    repeated Attachment attachments = 11;
+  }
+
+  uint64 total = 1;
+  repeated Card cards = 2;
+}
