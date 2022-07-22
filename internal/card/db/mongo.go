@@ -6,10 +6,10 @@ import (
 	"github.com/go-funcards/card-service/internal/card"
 	"github.com/go-funcards/mongodb"
 	"github.com/go-funcards/slice"
+	"github.com/sirupsen/logrus"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
-	"go.uber.org/zap"
 	"time"
 )
 
@@ -21,24 +21,24 @@ const (
 )
 
 type storage struct {
-	c mongodb.Collection[card.Card]
+	c   *mongo.Collection
+	log logrus.FieldLogger
 }
 
-func NewStorage(ctx context.Context, db *mongo.Database, logger *zap.Logger) (*storage, error) {
-	s := &storage{c: mongodb.Collection[card.Card]{
-		Inner: db.Collection(collection),
-		Log:   logger,
-	}}
-
-	if err := s.indexes(ctx); err != nil {
-		return nil, err
+func NewStorage(ctx context.Context, db *mongo.Database, log logrus.FieldLogger) *storage {
+	s := &storage{
+		c:   db.Collection(collection),
+		log: log,
 	}
-
-	return s, nil
+	s.indexes(ctx)
+	return s
 }
 
-func (s *storage) indexes(ctx context.Context) error {
-	name, err := s.c.Inner.Indexes().CreateOne(ctx, mongo.IndexModel{
+func (s *storage) indexes(ctx context.Context) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	name, err := s.c.Indexes().CreateOne(ctx, mongo.IndexModel{
 		Keys: bson.D{
 			{"owner_id", 1},
 			{"board_id", 1},
@@ -48,12 +48,19 @@ func (s *storage) indexes(ctx context.Context) error {
 			{"created_at", 1},
 			{"tags", 1},
 		},
+		Options: options.Index().SetName("cards_index_01"),
 	})
-	if err == nil {
-		s.c.Log.Info("index created", zap.String("collection", collection), zap.String("name", name))
+	if err != nil {
+		s.log.WithFields(logrus.Fields{
+			"collection": collection,
+			"error":      err,
+		}).Fatal("index not created")
 	}
 
-	return err
+	s.log.WithFields(logrus.Fields{
+		"collection": collection,
+		"name":       name,
+	}).Info("index created")
 }
 
 func (s *storage) Save(ctx context.Context, model card.Card) error {
@@ -61,13 +68,9 @@ func (s *storage) Save(ctx context.Context, model card.Card) error {
 }
 
 func (s *storage) SaveMany(ctx context.Context, models []card.Card) error {
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
 	var write []mongo.WriteModel
-
 	for _, model := range models {
-		data, err := s.c.ToM(model)
+		data, err := mongodb.ToBson(model)
 		if err != nil {
 			return err
 		}
@@ -81,7 +84,10 @@ func (s *storage) SaveMany(ctx context.Context, models []card.Card) error {
 		if deleteAtts := slice.Map(model.Attachments, func(item card.Attachment) string {
 			return item.AttachmentID
 		}); len(deleteAtts) > 0 {
-			s.c.Log.Info("delete attachments", zap.String("card_id", model.CardID), zap.Strings("attachments", deleteAtts))
+			s.log.WithFields(logrus.Fields{
+				"card_id":     model.CardID,
+				"attachments": deleteAtts,
+			}).Info("delete attachments")
 
 			write = append(write, mongo.
 				NewUpdateOneModel().
@@ -120,50 +126,80 @@ func (s *storage) SaveMany(ctx context.Context, models []card.Card) error {
 		)
 	}
 
-	s.c.Log.Debug("bulk update")
+	s.log.Info("cards save")
 
-	result, err := s.c.Inner.BulkWrite(ctx, write, options.BulkWrite())
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	result, err := s.c.BulkWrite(ctx, write)
 	if err != nil {
-		return fmt.Errorf(fmt.Sprintf("bulk update: %s", mongodb.ErrMsgQuery), err)
+		return fmt.Errorf(fmt.Sprintf("cards save: %s", mongodb.ErrMsgQuery), err)
 	}
 
-	s.c.Log.Info("document updated", zap.Any("result", result))
+	s.log.WithFields(logrus.Fields{"result": result}).Info("cards saved")
 
 	return nil
 }
 
 func (s *storage) Delete(ctx context.Context, id string) error {
-	return s.c.DeleteOne(ctx, bson.M{"_id": id})
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	s.log.WithField("card_id", id).Debug("card delete")
+	result, err := s.c.DeleteOne(ctx, bson.M{"_id": id})
+	if err != nil {
+		return fmt.Errorf(mongodb.ErrMsgQuery, err)
+	}
+	if result.DeletedCount == 0 {
+		return fmt.Errorf(mongodb.ErrMsgQuery, mongo.ErrNoDocuments)
+	}
+	s.log.WithField("card_id", id).Debug("card deleted")
+
+	return nil
 }
 
 func (s *storage) Find(ctx context.Context, filter card.Filter, index uint64, size uint32) ([]card.Card, error) {
-	return s.c.Find(ctx, s.filter(filter), s.c.FindOptions(index, size).
-		SetSort(bson.D{{"position", 1}, {"created_at", 1}}))
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	opts := mongodb.FindOptions(index, size).SetSort(bson.D{{"position", 1}, {"created_at", 1}})
+	cur, err := s.c.Find(ctx, s.build(filter), opts)
+	if err != nil {
+		return nil, fmt.Errorf(mongodb.ErrMsgQuery, err)
+	}
+	return mongodb.DecodeAll[card.Card](ctx, cur)
 }
 
 func (s *storage) Count(ctx context.Context, filter card.Filter) (uint64, error) {
-	return s.c.CountDocuments(ctx, s.filter(filter))
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	total, err := s.c.CountDocuments(ctx, s.build(filter))
+	if err != nil {
+		return 0, fmt.Errorf(mongodb.ErrMsgQuery, err)
+	}
+	return uint64(total), nil
 }
 
-func (s *storage) filter(filter card.Filter) bson.M {
-	f := make(bson.M)
+func (s *storage) build(filter card.Filter) any {
+	f := make(mongodb.Filter, 0)
 	if len(filter.CardIDs) > 0 {
-		f["_id"] = bson.M{"$in": filter.CardIDs}
+		f = append(f, mongodb.In("_id", filter.CategoryIDs))
 	}
 	if len(filter.Types) > 0 {
-		f["type"] = bson.M{"$in": filter.Types}
+		f = append(f, mongodb.In("type", filter.Types))
 	}
 	if len(filter.Tags) > 0 {
-		f["tags"] = bson.M{"$in": filter.Tags}
+		f = append(f, mongodb.In("tags", filter.Tags))
 	}
 	if len(filter.OwnerIDs) > 0 {
-		f["owner_id"] = bson.M{"$in": filter.OwnerIDs}
+		f = append(f, mongodb.In("owner_id", filter.OwnerIDs))
 	}
 	if len(filter.BoardIDs) > 0 {
-		f["board_id"] = bson.M{"$in": filter.BoardIDs}
+		f = append(f, mongodb.In("board_id", filter.BoardIDs))
 	}
 	if len(filter.CategoryIDs) > 0 {
-		f["category_id"] = bson.M{"$in": filter.CategoryIDs}
+		f = append(f, mongodb.In("category_id", filter.CategoryIDs))
 	}
-	return f
+	return f.Build()
 }

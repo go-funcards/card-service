@@ -22,16 +22,13 @@ service Card {
 enum CardType {
   UNK_CARD = 0; // UNKNOWN_CARD
   TEXT = 1;
-}
-
-enum AttType {
-  UNK_ATT = 0; // UNKNOWN_ATTACHMENT
+  LIST = 2;
 }
 
 message CreateCardRequest {
   message Att {
     string attachment_id = 1;
-    AttType type = 2;
+    string metadata = 2;
   }
 
   string card_id = 1;
@@ -49,7 +46,7 @@ message CreateCardRequest {
 message UpdateCardRequest {
   message Att {
     string attachment_id = 1;
-    AttType type = 2;
+    string metadata = 2;
     bool delete = 3;
   }
 
@@ -86,7 +83,7 @@ message CardsResponse {
   message Card {
     message Attachment {
       string attachment_id = 1;
-      AttType type = 2;
+      string metadata = 2;
     }
 
     string card_id = 1;

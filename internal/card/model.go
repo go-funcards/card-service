@@ -9,7 +9,7 @@ import (
 
 type Attachment struct {
 	AttachmentID string `json:"attachment_id" bson:"attachment_id,omitempty"`
-	Type         string `json:"type" bson:"type,omitempty"`
+	Metadata     string `json:"metadata" bson:"metadata,omitempty"`
 	Delete       bool   `json:"-" bson:"-"`
 }
 
@@ -36,14 +36,14 @@ type Filter struct {
 	CategoryIDs []string `json:"category_ids,omitempty"`
 }
 
-func (a Attachment) toResponse() *v1.CardsResponse_Card_Attachment {
+func (a Attachment) toProto() *v1.CardsResponse_Card_Attachment {
 	return &v1.CardsResponse_Card_Attachment{
 		AttachmentId: a.AttachmentID,
-		Type:         v1.AttType(v1.AttType_value[a.Type]),
+		Metadata:     a.Metadata,
 	}
 }
 
-func (c Card) toResponse() *v1.CardsResponse_Card {
+func (c Card) toProto() *v1.CardsResponse_Card {
 	return &v1.CardsResponse_Card{
 		CardId:     c.CardID,
 		OwnerId:    c.OwnerID,
@@ -56,7 +56,7 @@ func (c Card) toResponse() *v1.CardsResponse_Card {
 		CreatedAt:  timestamppb.New(c.CreatedAt),
 		Tags:       c.Tags,
 		Attachments: slice.Map(c.Attachments, func(a Attachment) *v1.CardsResponse_Card_Attachment {
-			return a.toResponse()
+			return a.toProto()
 		}),
 	}
 }
@@ -74,7 +74,7 @@ func CreateCard(in *v1.CreateCardRequest) Card {
 		CreatedAt:  time.Now().UTC(),
 		Tags:       in.GetTags(),
 		Attachments: slice.Map(in.GetAttachments(), func(item *v1.CreateCardRequest_Att) Attachment {
-			return Attachment{AttachmentID: item.GetAttachmentId(), Type: item.GetType().String()}
+			return Attachment{AttachmentID: item.GetAttachmentId(), Metadata: item.GetMetadata()}
 		}),
 	}
 }
@@ -91,7 +91,7 @@ func UpdateCard(in *v1.UpdateCardRequest) Card {
 		Attachments: slice.Map(in.GetAttachments(), func(item *v1.UpdateCardRequest_Att) Attachment {
 			return Attachment{
 				AttachmentID: item.GetAttachmentId(),
-				Type:         item.GetType().String(),
+				Metadata:     item.GetMetadata(),
 				Delete:       item.GetDelete(),
 			}
 		}),
