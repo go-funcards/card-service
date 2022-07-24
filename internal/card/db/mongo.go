@@ -6,7 +6,7 @@ import (
 	"github.com/go-funcards/card-service/internal/card"
 	"github.com/go-funcards/mongodb"
 	"github.com/go-funcards/slice"
-	"github.com/sirupsen/logrus"
+	"github.com/rs/zerolog"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -22,13 +22,13 @@ const (
 
 type storage struct {
 	c   *mongo.Collection
-	log logrus.FieldLogger
+	log zerolog.Logger
 }
 
-func NewStorage(ctx context.Context, db *mongo.Database, log logrus.FieldLogger) *storage {
+func NewStorage(ctx context.Context, db *mongo.Database, log zerolog.Logger) *storage {
 	s := &storage{
 		c:   db.Collection(collection),
-		log: log,
+		log: log.With().Str("storage", "mongodb").Str("collection", collection).Logger(),
 	}
 	s.indexes(ctx)
 	return s
@@ -51,16 +51,10 @@ func (s *storage) indexes(ctx context.Context) {
 		Options: options.Index().SetName("cards_index_01"),
 	})
 	if err != nil {
-		s.log.WithFields(logrus.Fields{
-			"collection": collection,
-			"error":      err,
-		}).Fatal("index not created")
+		s.log.Fatal().Err(err).Msg("index not created")
 	}
 
-	s.log.WithFields(logrus.Fields{
-		"collection": collection,
-		"name":       name,
-	}).Info("index created")
+	s.log.Info().Str("index.name", name).Msg("index created")
 }
 
 func (s *storage) Save(ctx context.Context, model card.Card) error {
@@ -84,10 +78,10 @@ func (s *storage) SaveMany(ctx context.Context, models []card.Card) error {
 		if deleteAtts := slice.Map(model.Attachments, func(item card.Attachment) string {
 			return item.AttachmentID
 		}); len(deleteAtts) > 0 {
-			s.log.WithFields(logrus.Fields{
-				"card_id":     model.CardID,
-				"attachments": deleteAtts,
-			}).Info("delete attachments")
+			s.log.Info().
+				Str("card_id", model.CardID).
+				Strs("attachments", deleteAtts).
+				Msg("delete attachments")
 
 			write = append(write, mongo.
 				NewUpdateOneModel().
@@ -126,7 +120,7 @@ func (s *storage) SaveMany(ctx context.Context, models []card.Card) error {
 		)
 	}
 
-	s.log.Info("cards save")
+	s.log.Info().Msg("cards save")
 
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -136,7 +130,7 @@ func (s *storage) SaveMany(ctx context.Context, models []card.Card) error {
 		return fmt.Errorf(fmt.Sprintf("cards save: %s", mongodb.ErrMsgQuery), err)
 	}
 
-	s.log.WithFields(logrus.Fields{"result": result}).Info("cards saved")
+	s.log.Info().Interface("result", result).Msg("cards saved")
 
 	return nil
 }
@@ -145,7 +139,7 @@ func (s *storage) Delete(ctx context.Context, id string) error {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	s.log.WithField("card_id", id).Debug("card delete")
+	s.log.Debug().Str("card_id", id).Msg("card delete")
 	result, err := s.c.DeleteOne(ctx, bson.M{"_id": id})
 	if err != nil {
 		return fmt.Errorf(mongodb.ErrMsgQuery, err)
@@ -153,7 +147,7 @@ func (s *storage) Delete(ctx context.Context, id string) error {
 	if result.DeletedCount == 0 {
 		return fmt.Errorf(mongodb.ErrMsgQuery, mongo.ErrNoDocuments)
 	}
-	s.log.WithField("card_id", id).Debug("card deleted")
+	s.log.Debug().Str("card_id", id).Msg("card deleted")
 
 	return nil
 }
